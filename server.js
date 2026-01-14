@@ -1,9 +1,6 @@
 /**
  * ===============================================================================
- * APEX PREDATOR v204.7 (OMNI-GOVERNOR - DETERMINISTIC SINGULARITY JS-UNIFIED)
- * ===============================================================================
- * STATUS: TOTAL MAXIMIZATION (MTE FINALITY)
- * UPGRADE: MULTICALL AGGREGATION & CYCLIC FEE CALCULATION
+ * APEX PREDATOR v204.7 (FIXED - JS-UNIFIED)
  * ===============================================================================
  */
 
@@ -24,7 +21,7 @@ const runHealthServer = () => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             engine: "APEX_TITAN",
-            version: "204.7-JS-MULTICALL",
+            version: "204.7-JS-FIXED",
             status: "OPERATIONAL"
         }));
     }).listen(port, '0.0.0.0', () => {
@@ -52,10 +49,6 @@ class ApexOmniGovernor {
         }
     }
 
-    /**
-     * PRO-LEVEL: Multicall Aggregator
-     * Fetches reserves for 50+ pools in one RPC round-trip.
-     */
     async getBulkReserves(networkName, poolAddresses) {
         const config = NETWORKS[networkName];
         const abi = ["function getReserves() external view returns (uint112, uint112, uint32)"];
@@ -78,45 +71,70 @@ class ApexOmniGovernor {
         }
     }
 
-    /**
-     * CYCLIC PROFIT CALCULATION
-     * Includes 0.3% (0.003) LP fee per hop (Standard Uniswap V2)
-     */
     calculateCyclicProfit(amountIn, reservesArray) {
         let currentAmount = amountIn;
-        const feeMultiplier = 997n; // Represents 100% - 0.3% fee
+        const feeMultiplier = 997n; 
 
         for (const reserve of reservesArray) {
             const [reserveIn, reserveOut] = reserve;
-            // Uniswap V2 Formula: (amountIn * 997 * reserveOut) / (reserveIn * 1000 + amountIn * 997)
             const amountInWithFee = currentAmount * feeMultiplier;
             const numerator = amountInWithFee * reserveOut;
             const denominator = (reserveIn * 1000n) + amountInWithFee;
             currentAmount = numerator / denominator;
         }
+        return currentAmount - amountIn;
+    }
 
-        return currentAmount - amountIn; // Returns Net Profit/Loss in BigInt
+    // FIXED: Added missing calculateMaxStrike logic
+    async calculateMaxStrike(networkName) {
+        const provider = this.providers[networkName];
+        const wallet = this.wallets[networkName];
+        if (!wallet) return null;
+
+        try {
+            const balance = await provider.getBalance(wallet.address);
+            const moat = ethers.parseEther(NETWORKS[networkName].moat);
+            if (balance <= moat) return null;
+
+            return { loan: balance - moat }; // Simple version for demonstration
+        } catch (e) { return null; }
     }
 
     async strike(networkName, pools) {
         const m = await this.calculateMaxStrike(networkName);
-        if (!m) return;
+        if (!m || !m.loan) return;
 
-        // Fetch reserves via Multicall
         const reserves = await this.getBulkReserves(networkName, pools);
-        
-        // Calculate Profit for a 3-hop cycle (ETH -> TokenA -> TokenB -> ETH)
-        const profit = this.calculateCyclicProfit(m.loan, reserves);
+        if (reserves.length === 0) return;
 
+        const profit = this.calculateCyclicProfit(m.loan, reserves);
         if (profit > 0n) {
             console.log(`[${networkName}] ARBITRAGE DETECTED: +${ethers.formatEther(profit)} ETH`.green);
-            // ... logic to execute executeComplexPath ...
         }
     }
 
-    // ... Rest of your existing logic (calculateMaxStrike, verifyAndLearn, run) ...
+    // FIXED: The missing run() function that caused your error
+    async run() {
+        console.log("⚡ APEX TITAN STARTING...".gold.bold);
+        
+        // Define your target pools here (Example addresses)
+        const targetPools = [
+            "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", // WMATIC/WETH example
+            "0x..." 
+        ];
+
+        while (true) {
+            for (const networkName of Object.keys(NETWORKS)) {
+                await this.strike(networkName, targetPools);
+            }
+            await new Promise(r => setTimeout(r, 5000)); // Scan every 5 seconds
+        }
+    }
 }
 
 runHealthServer();
 const governor = new ApexOmniGovernor();
-governor.run();
+// Ignition
+governor.run().catch(err => {
+    console.error("FATAL ERROR IN RUN LOOP:".red, err);
+});
